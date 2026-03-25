@@ -2,6 +2,8 @@
 
 A hands-on tutorial covering the most important **System Design** concepts, each paired with a working Python implementation you can run, study, and extend.
 
+> 📖 **New:** See [SYSTEM_DESIGN.md](./SYSTEM_DESIGN.md) for a comprehensive deep-dive into system design theory, principles, and real-world case studies (Netflix, Amazon, Twitter/X, Uber, WhatsApp) with Mermaid diagrams.
+
 ---
 
 ## Table of Contents
@@ -10,6 +12,7 @@ A hands-on tutorial covering the most important **System Design** concepts, each
 2. [Core Concepts](#core-concepts)
 3. [Projects](#projects)
 4. [How to Run](#how-to-run)
+5. [Architecture Diagrams](#architecture-diagrams)
 
 ---
 
@@ -23,6 +26,17 @@ Key goals:
 - **Reliability** — produce correct results consistently
 - **Performance** — respond quickly under load
 - **Maintainability** — easy to change and operate
+
+```mermaid
+flowchart TD
+    A[Clarify Requirements] --> B[Estimate Scale]
+    B --> C[Define API / Interfaces]
+    C --> D[High-Level Architecture]
+    D --> E[Deep-Dive Components]
+    E --> F[Identify Bottlenecks]
+    F --> G[Add Resilience & Observability]
+    G --> H[Iterate & Validate]
+```
 
 ---
 
@@ -40,6 +54,7 @@ Key goals:
 | **CAP Theorem** | A distributed system can guarantee at most 2 of: Consistency, Availability, Partition Tolerance |
 | **Database Sharding** | Split a large database across multiple machines |
 | **Replication** | Maintain copies of data on multiple nodes |
+| **Circuit Breaker** | Prevent cascading failures when a downstream service is unhealthy |
 
 ---
 
@@ -81,6 +96,12 @@ A hash ring with virtual node support. Adding or removing a server only remaps a
 
 An in-memory message broker inspired by Apache Kafka. Supports multiple topics, multiple consumer groups with independent offsets, and message retention.
 
+### [Project 6 — Circuit Breaker](./06-circuit-breaker/)
+
+**Concepts demonstrated:** finite state machine, fail-fast, cascading failure prevention, automatic recovery, thread safety.
+
+A production-grade Circuit Breaker implementation inspired by Netflix Hystrix. The breaker moves through three states (CLOSED → OPEN → HALF_OPEN) to protect services from being taken down by failing dependencies.
+
 ---
 
 ## How to Run
@@ -113,6 +134,7 @@ pytest
 
 # Run tests for one project
 pytest 01-url-shortener/tests/
+pytest 06-circuit-breaker/tests/
 ```
 
 ---
@@ -121,46 +143,74 @@ pytest 01-url-shortener/tests/
 
 ### URL Shortener
 
-```
-Client ──► [API Server] ──► [SQLite / Database]
-                │
-                └──► Base62(hash(long_url)) → short_code
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant API as API Server (Flask)
+    participant DB as SQLite Database
+
+    C->>API: POST /shorten {"url": "https://example.com/very/long/url"}
+    API->>API: Base62(MD5(long_url)) → short_code
+    API->>DB: INSERT (short_code, long_url, expires_at)
+    API-->>C: {"short_url": "http://localhost/aB3xYz"}
+
+    C->>API: GET /aB3xYz
+    API->>DB: SELECT long_url WHERE short_code = 'aB3xYz'
+    DB-->>API: long_url
+    API-->>C: 302 Redirect → https://example.com/very/long/url
 ```
 
 ### Rate Limiter (Token Bucket)
 
-```
-Request ──► Check bucket
-              │
-         tokens > 0 ?
-           ├── Yes → consume token, allow request
-           └── No  → reject (429 Too Many Requests)
+```mermaid
+flowchart TD
+    Request[Incoming Request] --> Check{Tokens available?}
+    Check -->|Yes: tokens > 0| Consume[Consume 1 token\nAllow request]
+    Check -->|No: tokens == 0| Reject[Reject request\n429 Too Many Requests]
+    Refill[Background refill\n+rate tokens/sec] --> Bucket[(Token Bucket)]
+    Bucket --> Check
 ```
 
 ### LRU Cache
 
-```
-GET(key):  HashMap O(1) lookup → move node to head → return value
-PUT(key):  HashMap insert → add node to head → evict tail if over capacity
+```mermaid
+graph LR
+    subgraph Cache["LRU Cache (capacity=3)"]
+        direction LR
+        Head[HEAD sentinel] <--> A[key=C\nMRU] <--> B[key=B] <--> C[key=A\nLRU] <--> Tail[TAIL sentinel]
+    end
+    HashMap["HashMap\n{A→nodeA, B→nodeB, C→nodeC}"] -.->|O(1) lookup| A & B & C
 ```
 
 ### Consistent Hash Ring
 
-```
-         node-A (0°)
-        /            \
-   node-C            node-B
-    (240°)           (120°)
-        \            /
-         key maps to nearest node clockwise
+```mermaid
+graph TD
+    subgraph Ring["Consistent Hash Ring"]
+        K1([key: user:42\nhashes to 95°]) -->|clockwise → first node| NA["node-A (120°)"]
+        NA --- NB["node-B (240°)"]
+        NB --- NC["node-C (360°/0°)"]
+        NC --- NA
+    end
 ```
 
 ### Pub/Sub Message Queue
 
+```mermaid
+graph LR
+    Producer -->|publish| Topic[Topic: orders\nmsg1 msg2 msg3 msg4 msg5]
+    Topic -->|offset=3| GroupA[Consumer Group A\nEmail Service]
+    Topic -->|offset=5| GroupB[Consumer Group B\nAnalytics Service]
+    Topic -->|offset=1| GroupC[Consumer Group C\nWarehouse Service]
 ```
-Producer ──► Topic ──► [msg1, msg2, msg3 ...]
-                              │
-               ┌──────────────┼──────────────┐
-            Group-A        Group-B        Group-C
-           (offset=2)     (offset=3)     (offset=1)
+
+### Circuit Breaker
+
+```mermaid
+stateDiagram-v2
+    [*] --> Closed : Initial state
+    Closed --> Open : failures ≥ threshold
+    Open --> HalfOpen : cooldown elapsed
+    HalfOpen --> Closed : probe succeeds
+    HalfOpen --> Open : probe fails
 ```
